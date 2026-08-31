@@ -1,0 +1,27 @@
+# Secrets & Config
+**/token.json
+**/client_secret*.json
+config/config.yaml
+*.env
+
+# Runtime State & Storage
+state/
+staging/
+photos/
+takeout/
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/
+.claude/
+

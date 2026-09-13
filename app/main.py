@@ -16,6 +16,19 @@ from .takeout_group import group_takeout_files, is_group_complete
 logger = logging.getLogger(__name__)
 
 
+MEDIA_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic",
+    ".mp4", ".mov", ".avi", ".mkv", ".m4v", ".dng", ".raw", ".cr2", ".nef"
+}
+
+
+def _has_media_files(extracted_dir: Path) -> bool:
+    for p in extracted_dir.rglob("*"):
+        if p.is_file() and p.suffix.lower() in MEDIA_EXTENSIONS:
+            return True
+    return False
+
+
 def run_once(cfg: Config, drive: DriveClient, state: StateStore) -> None:
     folder_id = cfg.drive.folder_id or drive.find_folder_id(cfg.drive.folder_name)
     files = drive.list_takeout_files(folder_id)
@@ -37,15 +50,21 @@ def run_once(cfg: Config, drive: DriveClient, state: StateStore) -> None:
         gpth_out_dir = cfg.gpth_output_dir / group.export_id
 
         try:
-            archive_paths = []
             for f in group.sorted_files():
                 dest = raw_dir / f.name
+                logger.info("Downloading %s ...", f.name)
                 drive.download_file(f.file_id, dest)
-                archive_paths.append(dest)
+                extractor.extract_archives([dest], extracted_dir)
+                dest.unlink(missing_ok=True)
 
-            extractor.extract_archives(archive_paths, extracted_dir)
-            gpth_runner.run_gpth(cfg.gpth, extracted_dir, gpth_out_dir)
-            importer.import_gpth_output(gpth_out_dir, cfg.library_dir, state, group.export_id)
+            if not _has_media_files(extracted_dir):
+                logger.info(
+                    "Export %s contains no media files (likely index or metadata archive), skipping gpth",
+                    group.export_id,
+                )
+            else:
+                gpth_runner.run_gpth(cfg.gpth, extracted_dir, gpth_out_dir)
+                importer.import_gpth_output(gpth_out_dir, cfg.library_dir, state, group.export_id)
 
             for f in group.files:
                 state.mark_drive_file_processed(f.file_id, group.export_id, now.isoformat())

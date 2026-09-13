@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def run_gpth(cfg: GpthConfig, input_dir: Path, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
-        str(cfg.binary_path),
+        str(cfg.binary_path.resolve()),
         "--input", str(input_dir),
         "--output", str(output_dir),
         # 2 = year/month folders, matching the existing library's layout.

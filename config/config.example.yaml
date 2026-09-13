@@ -1,0 +1,26 @@
+# Copy this file to config/config.yaml and adjust the values below.
+
+drive:
+  # Name of the Drive folder Takeout exports land in. Only used if folder_id is not set.
+  folder_name: "Takeout"
+  # Explicit Drive folder ID, if you'd rather not rely on name lookup. Leave null to use folder_name.
+  folder_id: null
+  # Path (inside the container) to the token.json produced by scripts/authorize.py.
+  token_path: "/config/token.json"
+
+# How often to check Drive for new/updated Takeout archives.
+poll_interval_minutes: 360
+
+# How long a Takeout export's most recently modified part must sit untouched
+# before the app treats the export as fully uploaded and safe to process.
+quiet_period_minutes: 45
+
+# Paths inside the container.
+staging_dir: "/staging"
+library_dir: "/photos"
+state_db_path: "/state/state.sqlite3"
+
+gpth:
+  binary_path: "/usr/local/bin/gpth"
+  # Extra flags passed straight through to gpth. See `gpth --help`.
+  extra_args: []

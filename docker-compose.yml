@@ -1,0 +1,14 @@
+services:
+  photosync:
+    build: .
+    container_name: photosync
+    restart: unless-stopped
+    environment:
+      - CONFIG_PATH=/config/config.yaml
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./config:/config:ro
+      - ./state:/state
+      - ./staging:/staging
+      # Point this at wherever your existing date-organized photo library lives.
+      - /volume1/PhotoSync:/takeout

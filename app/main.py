@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import time
@@ -55,16 +56,34 @@ def run_once(cfg: Config, drive: DriveClient, state: StateStore) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="PhotoSynApp - Google Photos Takeout backup")
+    parser.add_argument(
+        "--config",
+        default=os.environ.get("CONFIG_PATH", "/config/config.yaml"),
+        help="Path to YAML configuration file (default: $CONFIG_PATH or /config/config.yaml)",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run a single check/sync cycle and exit immediately instead of polling continuously",
+    )
+    args = parser.parse_args()
+
     os.umask(0o002)
     setup_logging(os.environ.get("LOG_LEVEL", "INFO"))
-    config_path = os.environ.get("CONFIG_PATH", "/config/config.yaml")
-    cfg = load_config(config_path)
+    cfg = load_config(args.config)
 
     state = StateStore(cfg.state_db_path)
     drive = DriveClient(cfg.drive.token_path)
 
     # Ensure existing library files have proper permissions
     importer.fix_library_permissions(cfg.library_dir)
+
+    if args.once:
+        logger.info("Running single PhotoSync cycle with config: %s", args.config)
+        run_once(cfg, drive, state)
+        logger.info("Single cycle complete.")
+        return
 
     logger.info("PhotoSync starting, poll interval = %d minutes", cfg.poll_interval_minutes)
     while True:

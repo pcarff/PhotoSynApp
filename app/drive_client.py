@@ -30,7 +30,16 @@ class DriveClient:
             f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' "
             "and trashed = false"
         )
-        results = self._service.files().list(q=query, fields="files(id, name)").execute()
+        results = (
+            self._service.files()
+            .list(
+                q=query,
+                fields="files(id, name)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            .execute()
+        )
         files = results.get("files", [])
         if not files:
             raise RuntimeError(f"No Drive folder named '{folder_name}' found")
@@ -47,6 +56,8 @@ class DriveClient:
                     q=query,
                     fields="nextPageToken, files(id, name, modifiedTime)",
                     pageToken=page_token,
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
                 )
                 .execute()
             )
@@ -60,7 +71,7 @@ class DriveClient:
 
     def download_file(self, file_id: str, dest_path: Path) -> None:
         dest_path.parent.mkdir(parents=True, exist_ok=True)
-        request = self._service.files().get_media(fileId=file_id)
+        request = self._service.files().get_media(fileId=file_id, supportsAllDrives=True)
         with io.FileIO(dest_path, "wb") as fh:
             downloader = MediaIoBaseDownload(fh, request)
             done = False

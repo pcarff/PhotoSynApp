@@ -1,7 +1,8 @@
 # Secrets & Config
 **/token.json
 **/client_secret*.json
-config/config.yaml
+config/config*.yaml
+!config/config*.example.yaml
 *.env
 
 # Runtime State & Storage

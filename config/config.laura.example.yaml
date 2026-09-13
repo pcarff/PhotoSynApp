@@ -1,0 +1,36 @@
+# Example configuration for processing Laura's Google Photos Takeout
+# Copy this file to config/config_laura.yaml and adjust paths/IDs.
+
+drive:
+  # Leave folder_name null if using an explicit shared folder_id from Google Drive.
+  # Otherwise set to "Takeout" if using Laura's own authorized token.
+  folder_name: null
+
+  # Explicit Google Drive folder ID (from the URL: https://drive.google.com/drive/folders/<FOLDER_ID>)
+  # Paste the ID of the folder Laura shared with your Google account here.
+  folder_id: "PASTE_LAURAS_SHARED_FOLDER_ID_HERE"
+
+  # Path to OAuth token (can use your token.json if she shared the folder with you,
+  # or token_laura.json if she authorized directly).
+  token_path: "config/token.json"
+
+# Check interval (in minutes)
+poll_interval_minutes: 360
+
+# Wait time after last modified file before starting extraction
+quiet_period_minutes: 45
+
+# Separate scratch staging area for Laura's downloads and processing
+staging_dir: "staging/laura"
+
+# Dedicated output directory for Laura's photos (isolated from other photo libraries)
+# If running directly: e.g. /volume1/PhotoSync/Laura
+# If running inside Docker: e.g. /takeout_laura (volume-mounted to /volume1/PhotoSync/Laura)
+library_dir: "/volume1/PhotoSync/Laura"
+
+# Dedicated SQLite state database so Laura's files and dedupe hashes remain completely isolated
+state_db_path: "state/state_laura.sqlite3"
+
+gpth:
+  binary_path: "/usr/local/bin/gpth"
+  extra_args: []

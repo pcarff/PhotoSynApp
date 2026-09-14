@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import sys
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from pathlib import Path
+from PyQt6.QtCore import QUrl, Qt
+from PyQt6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
+    QMessageBox,
+    QPushButton,
     QStatusBar,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from .doc_viewer import DOC_PATH, DocViewerDialog
 from .tabs.dedupe_tab import DedupeTab
 from .tabs.diff_tab import DiffTab
 from .tabs.exif_tab import ExifTab
@@ -24,6 +28,23 @@ QMainWindow, QWidget {
     color: #e0e0e0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 13px;
+}
+QMenuBar {
+    background-color: #181820;
+    color: #cccccc;
+    border-bottom: 1px solid #333344;
+}
+QMenuBar::item:selected {
+    background-color: #2b2b36;
+    color: #ffffff;
+}
+QMenu {
+    background-color: #22222c;
+    color: #eeeeee;
+    border: 1px solid #3d3d4a;
+}
+QMenu::item:selected {
+    background-color: #384860;
 }
 QGroupBox {
     border: 1px solid #3d3d4a;
@@ -123,9 +144,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PhotoVault Studio (Qt6) - Photo Ingestion, Differential & Deduplication")
-        self.resize(1300, 850)
+        self.resize(1350, 880)
 
-        # Tabs Setup
+        # 1. Setup Menu Bar
+        self._setup_menus()
+
+        # 2. Tabs Setup
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
 
@@ -139,12 +163,87 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.exif_tab, "🏷️ EXIF Inspector & Batch Date Editor")
         tabs.addTab(self.sync_tab, "⚡ NAS Sync & Local Vault")
 
+        # 3. Top-Right Documentation Button
+        btn_doc = QPushButton("📖 Documentation (F1)")
+        btn_doc.setStyleSheet("""
+            QPushButton {
+                background-color: #2b5c8f;
+                color: #ffffff;
+                font-weight: bold;
+                border: 1px solid #4178b0;
+                padding: 4px 14px;
+                margin: 4px 6px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #356fa8;
+            }
+        """)
+        btn_doc.clicked.connect(self.show_documentation)
+        tabs.setCornerWidget(btn_doc, Qt.Corner.TopRightCorner)
+
         self.setCentralWidget(tabs)
 
-        # Status Bar
+        # 4. Status Bar
         status = QStatusBar()
         self.setStatusBar(status)
-        status.showMessage("Cortex Workstation Active | 72 Xeon Cores | /Workspaces & /workspaces_nvme Ready")
+        status.showMessage("Cortex Workstation Active | 72 Xeon Cores | Local Storage: /Workspaces/Photos")
+
+    def _setup_menus(self):
+        menu_bar = self.menuBar()
+
+        # File Menu
+        file_menu = menu_bar.addMenu("&File")
+        act_exit = QAction("E&xit", self)
+        act_exit.setShortcut("Ctrl+Q")
+        act_exit.triggered.connect(self.close)
+        file_menu.addAction(act_exit)
+
+        # Tools Menu
+        tools_menu = menu_bar.addMenu("&Tools")
+        act_sync = QAction("Open NAS Sync Manager", self)
+        act_sync.triggered.connect(lambda: self.centralWidget().setCurrentIndex(3))
+        tools_menu.addAction(act_sync)
+
+        # Help Menu
+        help_menu = menu_bar.addMenu("&Help")
+
+        act_docs = QAction("📖 View Operations Guide & Runbook", self)
+        act_docs.setShortcut(QKeySequence("F1"))
+        act_docs.triggered.connect(self.show_documentation)
+        help_menu.addAction(act_docs)
+
+        act_ext_docs = QAction("📂 Open Guide in External Editor", self)
+        act_ext_docs.triggered.connect(self.open_external_docs)
+        help_menu.addAction(act_ext_docs)
+
+        help_menu.addSeparator()
+
+        act_about = QAction("ℹ️ About PhotoVault Studio", self)
+        act_about.triggered.connect(self.show_about)
+        help_menu.addAction(act_about)
+
+    def show_documentation(self):
+        dlg = DocViewerDialog(self)
+        dlg.exec()
+
+    def open_external_docs(self):
+        if DOC_PATH.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(DOC_PATH)))
+        else:
+            QMessageBox.warning(self, "Not Found", f"Documentation file not found: {DOC_PATH}")
+
+    def show_about(self):
+        QMessageBox.about(
+            self,
+            "About PhotoVault Studio",
+            "<h3>PhotoVault Studio (Qt6)</h3>"
+            "<p><b>Version:</b> 1.0.0<br>"
+            "<b>System:</b> Cortex Workstation (72 Xeon Cores, NVMe Scratch)<br>"
+            "<b>NAS Pair:</b> Synology DiskStation (10.19.5.11)</p>"
+            "<p>High-performance photo ingestion, differential analysis, perceptual visual deduplication, "
+            "and EXIF metadata repair engine.</p>"
+        )
 
 
 def main():

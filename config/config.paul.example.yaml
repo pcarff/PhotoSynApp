@@ -1,0 +1,20 @@
+# Configuration for Paul's Google Photos Takeout (Host / Manual Run)
+
+drive:
+  # Name of the Drive folder Takeout exports land in. Only used if folder_id is not set.
+  folder_name: "Takeout"
+  # Optional explicit Drive folder ID. If null, searches for folder_name.
+  folder_id: null
+  token_path: "config/token.json"
+
+poll_interval_minutes: 360
+quiet_period_minutes: 45
+
+# Paths on NAS host
+staging_dir: "/volume1/PhotoSync_Staging"
+library_dir: "/volume1/PhotoSync"
+state_db_path: "state/state.sqlite3"
+
+gpth:
+  binary_path: "bin/gpth"
+  extra_args: []

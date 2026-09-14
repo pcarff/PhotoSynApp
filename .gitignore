@@ -26,3 +26,7 @@ venv/
 .vscode/
 .claude/
 
+
+# Binaries
+bin/
+

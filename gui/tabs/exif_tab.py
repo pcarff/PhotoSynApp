@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import List
 
 from PyQt6.QtCore import QDate, QDateTime, QTime, Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDateTimeEdit,
     QFileDialog,
     QGroupBox,
@@ -85,8 +86,8 @@ class ExifTab(QWidget):
         h_sel.addWidget(btn_deselect_all)
         l_layout.addLayout(h_sel)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Sel", "Filename", "EXIF Date (Original)", "File Date", "Dimensions"])
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["Sel", "Filename", "Rating", "EXIF Date (Original)", "File Date", "Dimensions"])
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -104,7 +105,7 @@ class ExifTab(QWidget):
         self.lbl_preview = QLabel("Select a photo to preview")
         self.lbl_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_preview.setMinimumSize(220, 220)
-        self.lbl_preview.setStyleSheet("background-color: #1e1e1e; border: 1px solid #444;")
+        self.lbl_preview.setStyleSheet("background-color: #1e1e24; border: 1px solid #444;")
         p_layout.addWidget(self.lbl_preview)
 
         self.lbl_photo_details = QLabel("No photo selected.")
@@ -115,6 +116,11 @@ class ExifTab(QWidget):
         # Batch Date Tools
         tools_group = QGroupBox("Batch EXIF Tools (Applies to Checked Photos)")
         tool_layout = QVBoxLayout(tools_group)
+
+        # Date Option: Don't modify date option
+        self.chk_modify_date = QCheckBox("Modify Date/Time Header")
+        self.chk_modify_date.setChecked(True)
+        tool_layout.addWidget(self.chk_modify_date)
 
         # Mode A: Set Exact Date
         self.radio_exact = QRadioButton("Set Unified Date & Time:")
@@ -168,6 +174,18 @@ class ExifTab(QWidget):
         h_shift.addWidget(self.spin_shift_days)
         tool_layout.addLayout(h_shift)
 
+        # Star Rating / Favorite Tool
+        h_rating = QHBoxLayout()
+        h_rating.addWidget(QLabel("⭐ Star Rating / Favorite:"))
+        self.combo_rating = QComboBox()
+        self.combo_rating.addItems([
+            "Keep Existing Rating",
+            "⭐ Mark as 5-Star Favorite",
+            "Clear Rating (Un-favorite)"
+        ])
+        h_rating.addWidget(self.combo_rating)
+        tool_layout.addLayout(h_rating)
+
         # Extra options
         self.chk_clear_scanner = QCheckBox("Wipe Scanner Hardware tags (Make/Model/Software)")
         self.chk_clear_scanner.setChecked(True)
@@ -217,7 +235,7 @@ class ExifTab(QWidget):
                 if p.suffix.lower() in SUPPORTED_IMAGE_EXTS:
                     files.append(p)
             if len(files) > 1000:
-                break  # Cap initial view for performance
+                break
 
         for p in sorted(files):
             info = ExifManager.get_image_info(p)
@@ -227,23 +245,39 @@ class ExifTab(QWidget):
         self.table.setRowCount(len(self.file_items))
 
         for row, info in enumerate(self.file_items):
-            # Checkbox
+            # 0. Checkbox
             chk_item = QTableWidgetItem()
             chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
             chk_item.setCheckState(Qt.CheckState.Checked)
             self.table.setItem(row, 0, chk_item)
 
+            # 1. Filename
             self.table.setItem(row, 1, QTableWidgetItem(info["filename"]))
 
+            # 2. Rating
+            rating_val = info.get("rating")
+            if rating_val == 5:
+                rating_item = QTableWidgetItem("⭐⭐⭐⭐⭐")
+                rating_item.setForeground(QColor(240, 190, 40))
+            elif rating_val:
+                rating_item = QTableWidgetItem(f"{rating_val}★")
+            else:
+                rating_item = QTableWidgetItem("-")
+            self.table.setItem(row, 2, rating_item)
+
+            # 3. EXIF Date
             exif_str = info["exif_date"] or "Missing (Not set)"
             exif_item = QTableWidgetItem(exif_str)
             if not info["exif_date"]:
                 exif_item.setForeground(Qt.GlobalColor.red)
-            self.table.setItem(row, 2, exif_item)
+            self.table.setItem(row, 3, exif_item)
 
-            self.table.setItem(row, 3, QTableWidgetItem(info["modified_time"]))
+            # 4. File Date
+            self.table.setItem(row, 4, QTableWidgetItem(info["modified_time"]))
+
+            # 5. Dimensions
             dim_str = f"{info['width']} × {info['height']}" if info['width'] > 0 else "-"
-            self.table.setItem(row, 4, QTableWidgetItem(dim_str))
+            self.table.setItem(row, 5, QTableWidgetItem(dim_str))
 
         self.lbl_status.setText(f"Loaded {len(self.file_items):,} photos.")
 
@@ -275,8 +309,11 @@ class ExifTab(QWidget):
         else:
             self.lbl_preview.setText("No Preview")
 
+        rating_str = "⭐⭐⭐⭐⭐ (Favorite)" if info.get("is_favorite") else (f"{info.get('rating')}★" if info.get("rating") else "None")
+
         detail_text = f"""
         <b>File:</b> {info['filename']}<br>
+        <b>Rating:</b> <span style='color:#f0be28; font-weight:bold;'>{rating_str}</span><br>
         <b>EXIF Date:</b> {info['exif_date'] or '<i>None</i>'}<br>
         <b>File Size:</b> {info['size_human']}<br>
         <b>Resolution:</b> {info['width']} × {info['height']}<br>
@@ -310,32 +347,44 @@ class ExifTab(QWidget):
         self.progress_bar.setValue(0)
 
         modified_count = 0
+        rating_choice = self.combo_rating.currentIndex()
+
         for idx, row in enumerate(selected_indices, 1):
             info = self.file_items[row]
             file_path = info["path"]
 
-            # Determine new date
-            if self.radio_exact.isChecked():
-                py_dt = self.dt_picker.dateTime().toPyDateTime()
-                ExifManager.set_exif_date(file_path, py_dt)
-                modified_count += 1
-            elif self.radio_approx.isChecked():
-                y = self.spin_year.value()
-                m = self.spin_month.value()
-                py_dt = datetime(y, m, 15, 12, 0, 0)
-                ExifManager.set_exif_date(file_path, py_dt)
-                modified_count += 1
-            elif self.radio_filename.isChecked():
-                extracted = ExifManager.extract_date_from_filename(info["filename"])
-                if extracted:
-                    ExifManager.set_exif_date(file_path, extracted)
+            # 1. Date Modification (if checked)
+            if self.chk_modify_date.isChecked():
+                if self.radio_exact.isChecked():
+                    py_dt = self.dt_picker.dateTime().toPyDateTime()
+                    ExifManager.set_exif_date(file_path, py_dt)
                     modified_count += 1
-            elif self.radio_shift.isChecked():
-                y = self.spin_shift_years.value()
-                d = self.spin_shift_days.value()
-                if ExifManager.shift_exif_date(file_path, years=y, days=d):
+                elif self.radio_approx.isChecked():
+                    y = self.spin_year.value()
+                    m = self.spin_month.value()
+                    py_dt = datetime(y, m, 15, 12, 0, 0)
+                    ExifManager.set_exif_date(file_path, py_dt)
                     modified_count += 1
+                elif self.radio_filename.isChecked():
+                    extracted = ExifManager.extract_date_from_filename(info["filename"])
+                    if extracted:
+                        ExifManager.set_exif_date(file_path, extracted)
+                        modified_count += 1
+                elif self.radio_shift.isChecked():
+                    y = self.spin_shift_years.value()
+                    d = self.spin_shift_days.value()
+                    if ExifManager.shift_exif_date(file_path, years=y, days=d):
+                        modified_count += 1
 
+            # 2. Rating Modification
+            if rating_choice == 1:
+                ExifManager.set_rating(file_path, 5)
+                modified_count += 1
+            elif rating_choice == 2:
+                ExifManager.set_rating(file_path, 0)
+                modified_count += 1
+
+            # 3. Scanner Cleanup
             if self.chk_clear_scanner.isChecked():
                 ExifManager.clear_scanner_tags(file_path)
 

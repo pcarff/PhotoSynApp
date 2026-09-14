@@ -10,6 +10,7 @@ from . import extractor, gpth_runner, importer
 from .config import Config, load_config
 from .drive_client import DriveClient
 from .logging_setup import setup_logging
+from .metadata_tagger import MetadataTagger
 from .state import StateStore
 from .takeout_group import group_takeout_files, is_group_complete
 
@@ -63,7 +64,17 @@ def run_once(cfg: Config, drive: DriveClient, state: StateStore) -> None:
                     group.export_id,
                 )
             else:
+                logger.info("Scanning Takeout JSON sidecars for favorites and captions...")
+                fav_names, descriptions = MetadataTagger.parse_takeout_metadata(extracted_dir)
+                if fav_names:
+                    logger.info("Found %d favorited items in Takeout metadata", len(fav_names))
+
                 gpth_runner.run_gpth(cfg.gpth, extracted_dir, gpth_out_dir)
+
+                if fav_names or descriptions:
+                    tagged = MetadataTagger.tag_favorites_in_directory(gpth_out_dir, fav_names, descriptions)
+                    logger.info("Injected 5-star favorite ratings/captions into %d photos", tagged)
+
                 importer.import_gpth_output(gpth_out_dir, cfg.library_dir, state, group.export_id)
 
             for f in group.files:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -26,7 +27,9 @@ def fix_library_permissions(library_dir: Path) -> None:
         return
     for path in library_dir.rglob("*"):
         try:
-            if path.is_file():
+            if path.is_symlink():
+                continue
+            elif path.is_file():
                 path.chmod(0o664)
             elif path.is_dir():
                 path.chmod(0o775)
@@ -37,18 +40,41 @@ def fix_library_permissions(library_dir: Path) -> None:
 def import_gpth_output(
     gpth_output_dir: Path, library_dir: Path, state: StateStore, export_ts: str
 ) -> None:
-    """Copy every file gpth produced into the permanent library, skipping
-    anything whose content hash is already recorded there. Since Takeout
-    re-exports the whole library every cycle, this dedup step is what keeps
-    repeated runs from duplicating storage.
+    """Copy every file and symlink gpth produced into the permanent library, skipping
+    anything whose content hash is already recorded there. Canonical files land in ALL_PHOTOS,
+    while album shortcuts are preserved in Albums/ as symlinks taking zero extra disk space.
     """
-    imported, skipped = 0, 0
+    imported, skipped, symlinks_created = 0, 0, 0
     for src_path in gpth_output_dir.rglob("*"):
-        if not src_path.is_file():
+        # Skip directories
+        if src_path.is_dir() and not src_path.is_symlink():
             continue
 
         # Skip gpth operational artifacts (logs, progress files)
         if src_path.name.endswith(".log") or src_path.name == "progress.json":
+            continue
+
+        rel_path = src_path.relative_to(gpth_output_dir)
+        dest_path = library_dir / rel_path
+
+        # Case 1: Album shortcut / Symlink
+        if src_path.is_symlink():
+            link_target = os.readlink(src_path)
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                dest_path.parent.chmod(0o775)
+            except OSError:
+                pass
+
+            if dest_path.is_symlink() or dest_path.exists():
+                dest_path.unlink()
+
+            os.symlink(link_target, dest_path)
+            symlinks_created += 1
+            continue
+
+        # Case 2: Canonical media file
+        if not src_path.is_file():
             continue
 
         file_hash = _hash_file(src_path)
@@ -56,8 +82,6 @@ def import_gpth_output(
             skipped += 1
             continue
 
-        rel_path = src_path.relative_to(gpth_output_dir)
-        dest_path = library_dir / rel_path
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             dest_path.parent.chmod(0o775)
@@ -78,5 +102,9 @@ def import_gpth_output(
         state.record_hash(file_hash, str(dest_path), export_ts)
         imported += 1
 
-    logger.info("Import complete: %d new files, %d already backed up", imported, skipped)
-
+    logger.info(
+        "Import complete: %d new files, %d already backed up, %d album shortcuts created",
+        imported,
+        skipped,
+        symlinks_created,
+    )

@@ -71,6 +71,10 @@ class ExifManager:
                     if dt_orig:
                         val = dt_orig.decode("ascii", errors="ignore").strip()
                         info["exif_date"] = val
+
+                    # Check Rating tag (18246 = 0x4746)
+                    info["rating"] = exif_dict.get("0th", {}).get(piexif.ImageIFD.Rating, None)
+                    info["is_favorite"] = (info["rating"] == 5)
                 except Exception:
                     pass
         except Exception as e:
@@ -177,6 +181,32 @@ class ExifManager:
                 for tag in [piexif.ImageIFD.Make, piexif.ImageIFD.Model, piexif.ImageIFD.Software]:
                     if tag in zeroth:
                         del zeroth[tag]
+
+                exif_bytes = piexif.dump(exif_dict)
+                piexif.insert(exif_bytes, str(p))
+                return True
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def set_rating(file_path: Path | str, rating: int = 5) -> bool:
+        """Sets 0th IFD Rating (0 to 5 stars). 5 = Favorite."""
+        p = Path(file_path)
+        try:
+            if p.suffix.lower() in {".jpg", ".jpeg"}:
+                try:
+                    exif_dict = piexif.load(str(p))
+                except Exception:
+                    exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}}
+
+                if "0th" not in exif_dict:
+                    exif_dict["0th"] = {}
+
+                if rating <= 0:
+                    exif_dict["0th"].pop(piexif.ImageIFD.Rating, None)
+                else:
+                    exif_dict["0th"][piexif.ImageIFD.Rating] = rating
 
                 exif_bytes = piexif.dump(exif_dict)
                 piexif.insert(exif_bytes, str(p))

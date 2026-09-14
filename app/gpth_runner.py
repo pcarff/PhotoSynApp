@@ -17,8 +17,8 @@ def run_gpth(cfg: GpthConfig, input_dir: Path, output_dir: Path) -> None:
         "--output", str(output_dir),
         # 2 = year/month folders, matching the existing library's layout.
         "--divide-to-dates", "2",
-        # No album folders -- everything lands in the date-organized tree.
-        "--albums", "nothing",
+        # Album folders with symlinks to canonical photos in ALL_PHOTOS
+        "--albums", "shortcut",
         *cfg.extra_args,
     ]
     logger.info("Running gpth: %s", " ".join(cmd))

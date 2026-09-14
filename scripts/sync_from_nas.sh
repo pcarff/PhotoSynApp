@@ -33,7 +33,7 @@ sync_historical() {
     echo "Source: synology:/volume1/Photos/"
     echo "Dest:   $DEST_BASE/Historical_Master/"
     echo "=========================================================="
-    rsync -avh --info=progress2 --stats synology:/volume1/Photos/ "$DEST_BASE/Historical_Master/"
+    rsync -avh --info=progress2 --stats --exclude '@eaDir' --exclude '#recycle' synology:/volume1/Photos/ "$DEST_BASE/Historical_Master/"
 }
 
 case "$TARGET" in

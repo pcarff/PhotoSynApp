@@ -9,6 +9,7 @@ from PyQt6.QtCore import QDate, QDateTime, QTime, Qt
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDateTimeEdit,
@@ -347,49 +348,60 @@ class ExifTab(QWidget):
         self.progress_bar.setValue(0)
 
         modified_count = 0
+        failed_count = 0
         rating_choice = self.combo_rating.currentIndex()
+
+        target_rating: Optional[int] = None
+        if rating_choice == 1:
+            target_rating = 5
+        elif rating_choice == 2:
+            target_rating = 0
+
+        clear_scanner = self.chk_clear_scanner.isChecked()
 
         for idx, row in enumerate(selected_indices, 1):
             info = self.file_items[row]
             file_path = info["path"]
 
-            # 1. Date Modification (if checked)
+            target_dt: Optional[datetime] = None
             if self.chk_modify_date.isChecked():
                 if self.radio_exact.isChecked():
-                    py_dt = self.dt_picker.dateTime().toPyDateTime()
-                    ExifManager.set_exif_date(file_path, py_dt)
-                    modified_count += 1
+                    target_dt = self.dt_picker.dateTime().toPyDateTime()
                 elif self.radio_approx.isChecked():
                     y = self.spin_year.value()
                     m = self.spin_month.value()
-                    py_dt = datetime(y, m, 15, 12, 0, 0)
-                    ExifManager.set_exif_date(file_path, py_dt)
-                    modified_count += 1
+                    target_dt = datetime(y, m, 15, 12, 0, 0)
                 elif self.radio_filename.isChecked():
-                    extracted = ExifManager.extract_date_from_filename(info["filename"])
-                    if extracted:
-                        ExifManager.set_exif_date(file_path, extracted)
-                        modified_count += 1
+                    target_dt = ExifManager.extract_date_from_filename(info["filename"])
                 elif self.radio_shift.isChecked():
                     y = self.spin_shift_years.value()
                     d = self.spin_shift_days.value()
-                    if ExifManager.shift_exif_date(file_path, years=y, days=d):
-                        modified_count += 1
+                    target_dt = ExifManager.calculate_shifted_date(info.get("exif_date"), years=y, days=d)
 
-            # 2. Rating Modification
-            if rating_choice == 1:
-                ExifManager.set_rating(file_path, 5)
-                modified_count += 1
-            elif rating_choice == 2:
-                ExifManager.set_rating(file_path, 0)
-                modified_count += 1
+            # Apply date, rating, and scanner cleanup in a single atomic pass
+            success = ExifManager.update_metadata(
+                file_path,
+                new_dt=target_dt,
+                rating=target_rating,
+                clear_scanner=clear_scanner,
+            )
 
-            # 3. Scanner Cleanup
-            if self.chk_clear_scanner.isChecked():
-                ExifManager.clear_scanner_tags(file_path)
+            if success:
+                modified_count += 1
+            else:
+                failed_count += 1
 
             self.progress_bar.setValue(idx)
+            self.lbl_status.setText(f"Processed {idx} of {len(selected_indices)} photos...")
+            QApplication.processEvents()
 
         self.progress_bar.setVisible(False)
-        QMessageBox.information(self, "Batch Complete", f"Successfully updated EXIF tags on {modified_count} photos!")
+        if failed_count == 0:
+            QMessageBox.information(self, "Batch Complete", f"Successfully updated EXIF tags on {modified_count} photos!")
+        else:
+            QMessageBox.warning(
+                self,
+                "Batch Completed with Warnings",
+                f"Updated {modified_count} photos successfully.\nFailed to update {failed_count} photos."
+            )
         self._load_photos()

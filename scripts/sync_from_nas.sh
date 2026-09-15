@@ -6,8 +6,31 @@ set -euo pipefail
 
 TARGET="${1:-all}"
 DEST_BASE="/Workspaces/Photos"
+TIMESTAMP="$(date +'%Y-%m-%d_%H%M%S')"
+ARCHIVE_DIR="$DEST_BASE/_Deleted_Archive/$(date +'%Y-%m-%d')"
 
 mkdir -p "$DEST_BASE/Laura_Only" "$DEST_BASE/Paul_Combined" "$DEST_BASE/Historical_Master"
+
+# Standard exclusions for Synology metadata and OS junk
+COMMON_EXCLUDES=(
+    --exclude '@eaDir'
+    --exclude '@eaDir/**'
+    --exclude '#recycle'
+    --exclude '#recycle/**'
+    --exclude '@tmp'
+    --exclude '@tmp/**'
+    --exclude '.DS_Store'
+    --exclude '._*'
+    --exclude 'Thumbs.db'
+    --exclude 'desktop.ini'
+)
+
+# Safe deletion mirroring: cleans up removed files from active tree, but archives them safely
+SAFE_DELETE_OPTS=(
+    --delete
+    --backup
+    --backup-dir="$ARCHIVE_DIR"
+)
 
 sync_laura() {
     echo "=========================================================="
@@ -15,7 +38,10 @@ sync_laura() {
     echo "Source: synology:/volume1/PhotoSync/Laura/ALL_PHOTOS/"
     echo "Dest:   $DEST_BASE/Laura_Only/"
     echo "=========================================================="
-    rsync -avh --info=progress2 --stats synology:/volume1/PhotoSync/Laura/ALL_PHOTOS/ "$DEST_BASE/Laura_Only/"
+    rsync -avh --info=progress2 --stats \
+        "${COMMON_EXCLUDES[@]}" \
+        "${SAFE_DELETE_OPTS[@]}" \
+        synology:/volume1/PhotoSync/Laura/ALL_PHOTOS/ "$DEST_BASE/Laura_Only/"
 }
 
 sync_paul() {
@@ -24,7 +50,10 @@ sync_paul() {
     echo "Source: synology:/volume1/PhotoSync/ALL_PHOTOS/"
     echo "Dest:   $DEST_BASE/Paul_Combined/"
     echo "=========================================================="
-    rsync -avh --info=progress2 --stats synology:/volume1/PhotoSync/ALL_PHOTOS/ "$DEST_BASE/Paul_Combined/"
+    rsync -avh --info=progress2 --stats \
+        "${COMMON_EXCLUDES[@]}" \
+        "${SAFE_DELETE_OPTS[@]}" \
+        synology:/volume1/PhotoSync/ALL_PHOTOS/ "$DEST_BASE/Paul_Combined/"
 }
 
 sync_historical() {
@@ -33,7 +62,10 @@ sync_historical() {
     echo "Source: synology:/volume1/Photos/"
     echo "Dest:   $DEST_BASE/Historical_Master/"
     echo "=========================================================="
-    rsync -avh --info=progress2 --stats --exclude '@eaDir' --exclude '#recycle' synology:/volume1/Photos/ "$DEST_BASE/Historical_Master/"
+    rsync -avh --info=progress2 --stats \
+        "${COMMON_EXCLUDES[@]}" \
+        "${SAFE_DELETE_OPTS[@]}" \
+        synology:/volume1/Photos/ "$DEST_BASE/Historical_Master/"
 }
 
 case "$TARGET" in
@@ -56,6 +88,11 @@ case "$TARGET" in
         exit 1
         ;;
 esac
+
+# Clean up empty archive dir if nothing was deleted/backed up
+if [ -d "$ARCHIVE_DIR" ] && [ -z "$(ls -A "$ARCHIVE_DIR" 2>/dev/null)" ]; then
+    rmdir "$ARCHIVE_DIR" 2>/dev/null || true
+fi
 
 echo ""
 echo "Sync completed successfully at $(date)!"

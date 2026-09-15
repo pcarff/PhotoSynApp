@@ -113,6 +113,18 @@ Your workstation (`cortex`) provides:
 2. **Instant 3-2-1 Redundancy**: You maintain a full, bit-for-bit identical replica of all three libraries locally on Cortex and remotely on the Synology NAS.
 3. **High-Speed Network Mirroring**: Transferring between Cortex and Synology runs at wire speed (~85–110 MB/s) via [`scripts/sync_from_nas.sh`](file:///workspaces_nvme/PhotoSynApp/scripts/sync_from_nas.sh).
 
+### 4.3 Network Sharing for Laura & Automated NAS Backup
+To enable editing and printing from any computer in the house while maintaining Cortex's compute performance:
+* **Cortex as Core Working Hub**: `/Workspaces/Photos` is the authoritative master working library.
+* **Samba Network Share for Laura**:
+  * Shared as `[Photos]` on Cortex (`10.19.5.129`).
+  * Mapped as network drive `P:\` on Laura's machine (`\\10.19.5.129\Photos` or `smb://10.19.5.129/Photos`).
+  * Permissions are enforced via `force user = pcarff` and `force group = pcarff` with `0664/2775` masks so that any files Laura creates, edits, or saves over SMB automatically inherit proper permissions on Cortex.
+* **Automated Nightly Backup to Synology**:
+  * Scheduled via cron at 3:00 AM: `/home/pcarff/bin/sync_photos_to_nas.sh all`
+  * Automatically pushes all daytime edits, scans, and imports from Cortex to Synology (`/volume1/Photos` and `/volume1/PhotoSync`).
+  * Excludes metadata junk (`@eaDir`, `#recycle`, `.DS_Store`, `Thumbs.db`).
+
 ---
 
 ## 5. PhotoVault Studio (Qt6 Desktop GUI Application)
@@ -236,9 +248,36 @@ Specially built for processing **vintage physical scans** and organizing histori
 
 ## 11. Legacy Family Photo Scanning Guide
 
-* **Recommended Resolution**: 600 DPI for prints, 2400–4800 DPI for 35mm slides/negatives.
-* **Format**: High-quality JPEG (95–100%) or TIFF.
-* **Fixing Scanner Timestamps**: Use **PhotoVault Studio $\rightarrow$ EXIF Inspector & Batch Date Editor** to set vintage years or approximate dates so photos appear on your historical timeline instead of the year scanned.
+### 11.1 Scanning Best Practices
+* **Hardware**: Flatbed scanner (e.g. Epson Perfection) for vintage, fragile, or textured paper prints.
+* **Resolution Guidelines**:
+  * **600 DPI (Sweet Spot)**: Ideal for 4×6, 5×7, and 8×10 prints. Allows 2× digital zoom and high-quality reprint without capturing excess paper grain.
+  * **1200 DPI**: Small prints, locket photos, wallet sizes.
+  * **2400–4800 DPI**: 35mm film slides and negatives.
+* **Color Mode**: Always scan in **24-bit color**, even for black-and-white photos (preserves sepia patina and makes digital dust/scratch removal easier).
+* **Format**: Lossless TIFF or PNG for master scans, high-quality JPEG (95–100%) for web viewing.
+* **Turn Off Auto-Enhancements**: Disable scanner software auto-contrast, digital sharpening, and color correction. Save clean digital negatives and adjust later in post.
+
+### 11.2 Ingesting Scans with Automatic Deduplication Hash Registration (`add_scanned_photo.py`)
+When you scan photos locally, you can ingest them into the library with automatic deduplication protection using [`scripts/add_scanned_photo.py`](file:///workspaces_nvme/PhotoSynApp/scripts/add_scanned_photo.py) (also installed globally at `/home/pcarff/bin/add_scanned_photo.py`).
+
+```bash
+# Add to Laura's Library (e.g., August 1924):
+add_scanned_photo.py /path/to/scan.png --target laura --year 1924 --month 08
+
+# Add to Paul's Combined Library (e.g., September 1931):
+add_scanned_photo.py /path/to/scan.png --target paul --year 1931 --month 09
+
+# Options:
+#   --move     Move the source file instead of copying
+#   --name     Specify a clean destination filename
+```
+
+**What the ingestion tool handles automatically:**
+1. **Directory Formatting**: Automatically creates and routes the photo to `/Workspaces/Photos/<Target>/YYYY/MM/`.
+2. **Permission Synchronization**: Sets permissions to `0664` / `pcarff:pcarff` so Laura can instantly open, edit, and print the new scan from her mapped network drive.
+3. **SHA-256 Hash Registration**: Computes the SHA-256 content hash and registers it in `state_laura.sqlite3` (or `state.sqlite3`). If Google Takeout archives ever contain this scan in the future, PhotoSynApp will detect the matching hash and skip it without creating duplicate files.
+4. **Collision Avoidance**: If a file with the same name exists but different content, it safely increments the suffix (`_1.png`, `_2.png`).
 
 ---
 
@@ -262,6 +301,11 @@ Specially built for processing **vintage physical scans** and organizing histori
 | Task | Execution Command |
 | :--- | :--- |
 | **Launch PhotoVault Studio GUI** | `/workspaces_nvme/PhotoSynApp/bin/photovault-gui` |
+| **Ingest Scanned Photo (Laura)** | `add_scanned_photo.py <photo.png> --target laura --year <YYYY> --month <MM>` |
+| **Ingest Scanned Photo (Paul)** | `add_scanned_photo.py <photo.png> --target paul --year <YYYY> --month <MM>` |
+| **Backup Photos to Synology NAS** | `/home/pcarff/bin/sync_photos_to_nas.sh all` |
+| **Laura's Network Share (Windows)** | `\\10.19.5.129\Photos` (Mapped as Drive `P:`) |
+| **Laura's Network Share (macOS)** | `smb://10.19.5.129/Photos` |
 | **Sync Laura Photos to Cortex** | `/workspaces_nvme/PhotoSynApp/scripts/sync_from_nas.sh laura` |
 | **Sync Paul Photos to Cortex** | `/workspaces_nvme/PhotoSynApp/scripts/sync_from_nas.sh paul` |
 | **Sync Historical Master to Cortex**| `/workspaces_nvme/PhotoSynApp/scripts/sync_from_nas.sh historical` |

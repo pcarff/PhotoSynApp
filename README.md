@@ -168,6 +168,25 @@ docker compose logs -f
 
 ---
 
+## Ingesting Physical Scanned Photos
+
+If you scan vintage or physical family photos, you can ingest them into the library with automatic deduplication hash registration:
+
+```bash
+# Ingest into Laura's isolated archive:
+python scripts/add_scanned_photo.py /path/to/scan.png --target laura --year 1924 --month 08
+
+# Ingest into Paul's combined archive:
+python scripts/add_scanned_photo.py /path/to/scan.png --target paul --year 1931 --month 09
+```
+
+This ensures:
+1. Files land in the correct `YYYY/MM` folder hierarchy.
+2. Permissions are set to `0664` for network sharing.
+3. Content SHA-256 hashes are registered in SQLite (`state_laura.sqlite3` or `state.sqlite3`) so future Google Takeout archives will recognize them and avoid duplicate imports.
+
+---
+
 ## Storage Sizing Recommendations
 
 Each processed export requires temporary staging space for:

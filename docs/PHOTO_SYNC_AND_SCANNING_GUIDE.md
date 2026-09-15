@@ -149,7 +149,7 @@ flowchart LR
 * **Side-by-Side Visual Reviewer**:
   - Displays high-resolution side-by-side previews of duplicate pairs.
   - **Smart Pick**: Highlights the higher resolution image (e.g. $4032 \times 3024$ vs $1920 \times 1080$) and larger file size in green.
-  - One-click actions: "Keep Highest Resolution", "Keep Left", "Keep Right", or "Move Duplicates to Review Folder".
+  - One-click actions: "Keep Highest Resolution", "Keep Left", "Keep Right", or batch **"Keep Highest Res on ALL Duplicates"** with safety confirmation dialog and progress indicator.
 
 ### 5.3 Tab 3: EXIF Inspector & Batch Date Editor
 Specially built for processing **vintage physical scans** and organizing historical photos:

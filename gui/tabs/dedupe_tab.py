@@ -261,6 +261,8 @@ class DedupeTab(QWidget):
 
         if groups:
             self.list_groups.setCurrentRow(0)
+        else:
+            self._clear_cards()
 
     def _on_error(self, err_msg: str):
         self.btn_scan.setEnabled(True)
@@ -269,12 +271,26 @@ class DedupeTab(QWidget):
         self.lbl_status.setText(f"Error: {err_msg}")
         QMessageBox.critical(self, "Scan Error", err_msg)
 
+    def _clear_cards(self):
+        """Reset card previews and information when no duplicate group is selected."""
+        self.lbl_preview_left.clear()
+        self.lbl_preview_left.setText("No duplicates to compare")
+        self.lbl_info_left.setText("-")
+        self.left_card.setTitle("Photo A (Left)")
+
+        self.lbl_preview_right.clear()
+        self.lbl_preview_right.setText("No duplicates to compare")
+        self.lbl_info_right.setText("-")
+        self.right_card.setTitle("Photo B (Right)")
+
     def _on_group_selected(self, row: int):
         if row < 0 or row >= len(self.duplicate_groups):
+            self._clear_cards()
             return
         self.current_group_idx = row
         grp = self.duplicate_groups[row]
         if len(grp) < 2:
+            self._clear_cards()
             return
 
         item_a = grp[0]
@@ -294,8 +310,11 @@ class DedupeTab(QWidget):
         res_a = item["width"] * item["height"]
         res_b = other_item["width"] * other_item["height"]
 
-        res_color = "green" if res_a > res_b else ("red" if res_a < res_b else "black")
-        size_color = "green" if item["size"] > other_item["size"] else ("red" if item["size"] < other_item["size"] else "black")
+        res_color = "#28a745" if res_a > res_b else ("#dc3545" if res_a < res_b else "#bbb")
+        size_color = "#28a745" if item["size"] > other_item["size"] else ("#dc3545" if item["size"] < other_item["size"] else "#bbb")
+
+        card = self.left_card if is_left else self.right_card
+        card.setTitle(f"Photo {'A (Left)' if is_left else 'B (Right)'}: {item['filename']}")
 
         info_text = f"""
         <b>Filename:</b> {item['filename']}<br>
@@ -306,39 +325,101 @@ class DedupeTab(QWidget):
         info_lbl.setText(info_text)
 
     def _keep_left(self):
+        if self.current_group_idx < 0 or self.current_group_idx >= len(self.duplicate_groups):
+            return
         self._resolve_duplicate(keep_idx=0, trash_idx=1)
 
     def _keep_right(self):
+        if self.current_group_idx < 0 or self.current_group_idx >= len(self.duplicate_groups):
+            return
         self._resolve_duplicate(keep_idx=1, trash_idx=0)
 
     def _keep_higher_res(self):
-        if self.current_group_idx < 0:
+        if self.current_group_idx < 0 or self.current_group_idx >= len(self.duplicate_groups):
             return
         grp = self.duplicate_groups[self.current_group_idx]
+        if len(grp) < 2:
+            return
+
         res_0 = grp[0]["width"] * grp[0]["height"]
         res_1 = grp[1]["width"] * grp[1]["height"]
 
-        if res_0 >= res_1:
+        if res_0 > res_1:
             self._resolve_duplicate(keep_idx=0, trash_idx=1)
-        else:
+        elif res_1 > res_0:
             self._resolve_duplicate(keep_idx=1, trash_idx=0)
+        else:
+            # Identical resolution: prefer larger file size (less compression/higher fidelity)
+            if grp[0].get("size", 0) >= grp[1].get("size", 0):
+                self._resolve_duplicate(keep_idx=0, trash_idx=1)
+            else:
+                self._resolve_duplicate(keep_idx=1, trash_idx=0)
 
     def _resolve_duplicate(self, keep_idx: int, trash_idx: int):
-        if self.current_group_idx < 0:
+        if self.current_group_idx < 0 or self.current_group_idx >= len(self.duplicate_groups):
             return
         grp = self.duplicate_groups[self.current_group_idx]
-        trash_item = grp[trash_idx]
+        if len(grp) < 2 or trash_idx >= len(grp):
+            return
 
+        trash_item = grp[trash_idx]
         trash_dir = Path("/Workspaces/Photos/_Duplicates_Trash")
         trash_dir.mkdir(parents=True, exist_ok=True)
 
-        dest = trash_dir / trash_item["filename"]
+        target_name = trash_item["filename"]
+        dest = trash_dir / target_name
+        if dest.exists():
+            stem = Path(target_name).stem
+            suffix = Path(target_name).suffix
+            counter = 1
+            while (trash_dir / f"{stem}_{counter}{suffix}").exists():
+                counter += 1
+            dest = trash_dir / f"{stem}_{counter}{suffix}"
+
         try:
-            shutil.move(trash_item["path"], dest)
-            self.lbl_status.setText(f"Moved duplicate to trash folder: {dest.name}")
-            # Remove resolved set
-            self.duplicate_groups.pop(self.current_group_idx)
-            self.list_groups.takeItem(self.current_group_idx)
-            self.lbl_groups_count.setText(f"Duplicate Groups ({len(self.duplicate_groups):,} found)")
+            src = Path(trash_item["path"])
+            if src.exists():
+                shutil.move(str(src), str(dest))
+                self.lbl_status.setText(f"Moved duplicate to trash folder: {dest.name}")
+            else:
+                self.lbl_status.setText(f"Source file was already missing: {src.name}")
+
+            # Remove trashed item from the duplicate group
+            grp.pop(trash_idx)
+
+            # If the group still has 2 or more files, keep it active to compare remaining duplicates
+            if len(grp) >= 2:
+                names = ", ".join(item["filename"] for item in grp[:2])
+                item_widget = self.list_groups.item(self.current_group_idx)
+                if item_widget:
+                    item_widget.setText(f"Set #{self.current_group_idx + 1} ({len(grp)} files): {names}")
+                # Re-render the current group with remaining photos
+                self._on_group_selected(self.current_group_idx)
+            else:
+                # Group is fully resolved! Remove from list and duplicate_groups
+                # Temporarily block signals so intermediate takeItem events don't desynchronize UI
+                self.list_groups.blockSignals(True)
+                try:
+                    self.duplicate_groups.pop(self.current_group_idx)
+                    taken = self.list_groups.takeItem(self.current_group_idx)
+                    del taken
+                finally:
+                    self.list_groups.blockSignals(False)
+
+                total_remaining = len(self.duplicate_groups)
+                self.lbl_groups_count.setText(f"Duplicate Groups ({total_remaining:,} found)")
+
+                if total_remaining > 0:
+                    # Advance to next group, clamping if we just removed the last item
+                    next_idx = min(self.current_group_idx, total_remaining - 1)
+                    self.current_group_idx = next_idx
+                    self.list_groups.setCurrentRow(next_idx)
+                    self._on_group_selected(next_idx)
+                else:
+                    self.current_group_idx = -1
+                    self.list_groups.setCurrentRow(-1)
+                    self._clear_cards()
+                    self.lbl_status.setText("All duplicate groups have been resolved!")
+
         except Exception as e:
             QMessageBox.critical(self, "Error Moving Duplicate", str(e))

@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from gui.tabs.dedupe_tab import DedupeTab
 
 @pytest.fixture(scope="session")
@@ -25,7 +25,6 @@ def test_dedupe_advance_after_resolution(qapp, tmp_path):
     img4.write_bytes(b"image 4 bytes")
 
     tab = DedupeTab()
-    # Override trash folder to temporary directory for safe testing
     groups = [
         [
             {"path": str(img1), "filename": "img1.jpg", "width": 1920, "height": 1080, "size": 1000},
@@ -91,3 +90,61 @@ def test_dedupe_multi_item_group(qapp, tmp_path):
     assert tab.list_groups.count() == 1
     assert "f2.jpg" in tab.lbl_info_left.text()
     assert "f3.jpg" in tab.lbl_info_right.text()
+
+
+def test_auto_resolve_all_highest_res(qapp, tmp_path, monkeypatch):
+    # Mock message boxes to proceed without modal blocking in automated tests
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
+
+    # Group 1: 2 files, 4K vs 1080p -> 4K kept
+    g1_low = tmp_path / "g1_low.jpg"
+    g1_low.write_bytes(b"low")
+    g1_high = tmp_path / "g1_high.jpg"
+    g1_high.write_bytes(b"high")
+
+    # Group 2: 3 files -> best resolution & size kept
+    g2_a = tmp_path / "g2_a.jpg"
+    g2_a.write_bytes(b"a")
+    g2_b = tmp_path / "g2_b.jpg"
+    g2_b.write_bytes(b"b")
+    g2_c = tmp_path / "g2_c.jpg"
+    g2_c.write_bytes(b"c")
+
+    tab = DedupeTab()
+    groups = [
+        [
+            {"path": str(g1_low), "filename": "g1_low.jpg", "width": 1920, "height": 1080, "size": 1000},
+            {"path": str(g1_high), "filename": "g1_high.jpg", "width": 3840, "height": 2160, "size": 4000},
+        ],
+        [
+            {"path": str(g2_a), "filename": "g2_a.jpg", "width": 800, "height": 600, "size": 200},
+            {"path": str(g2_b), "filename": "g2_b.jpg", "width": 2048, "height": 1536, "size": 1500},
+            {"path": str(g2_c), "filename": "g2_c.jpg", "width": 1024, "height": 768, "size": 500},
+        ]
+    ]
+
+    tab._on_finished(groups)
+    assert tab.list_groups.count() == 2
+    assert tab.btn_auto_resolve_all.isEnabled() is True
+
+    # Execute auto-resolve all
+    tab._auto_resolve_all_highest_res()
+
+    # All duplicate groups must be completely resolved
+    assert len(tab.duplicate_groups) == 0
+    assert tab.list_groups.count() == 0
+    assert tab.current_group_idx == -1
+    assert "No duplicates" in tab.lbl_preview_left.text()
+    assert "No duplicates" in tab.lbl_preview_right.text()
+    assert tab.btn_auto_resolve_all.isEnabled() is False
+
+    # Check that highest resolution files still exist on disk
+    assert g1_high.exists()
+    assert g2_b.exists()
+
+    # Check that lower resolution files were moved to trash
+    trash_dir = Path("/Workspaces/Photos/_Duplicates_Trash")
+    assert not g1_low.exists()
+    assert not g2_a.exists()
+    assert not g2_c.exists()

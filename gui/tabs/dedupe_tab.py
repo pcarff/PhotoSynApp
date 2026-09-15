@@ -8,6 +8,7 @@ from typing import List
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QFileDialog,
     QGroupBox,
@@ -18,6 +19,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QRadioButton,
     QSlider,
@@ -153,6 +155,12 @@ class DedupeTab(QWidget):
         self.btn_keep_higher_res.setStyleSheet("font-weight: bold; color: #2e6da4;")
         self.btn_keep_higher_res.clicked.connect(self._keep_higher_res)
         h_actions.addWidget(self.btn_keep_higher_res)
+
+        self.btn_auto_resolve_all = QPushButton("⚡ Keep Highest Res on ALL Duplicates")
+        self.btn_auto_resolve_all.setStyleSheet("font-weight: bold; background-color: #2b7a4b; color: white; padding: 4px 12px;")
+        self.btn_auto_resolve_all.setToolTip("Automatically keep the highest resolution / highest quality photo in every duplicate group and move all other duplicates to trash.")
+        self.btn_auto_resolve_all.clicked.connect(self._auto_resolve_all_highest_res)
+        h_actions.addWidget(self.btn_auto_resolve_all)
         r_layout.addLayout(h_actions)
 
         # Image Cards Splitter
@@ -191,6 +199,7 @@ class DedupeTab(QWidget):
 
         splitter.setSizes([300, 700])
         main_layout.addWidget(splitter)
+        self._update_action_buttons_state()
 
     def _toggle_phash_opts(self):
         enabled = self.radio_phash.isChecked()
@@ -218,6 +227,8 @@ class DedupeTab(QWidget):
         self.lbl_status.setText("Initializing scanner...")
         self.list_groups.clear()
         self.duplicate_groups = []
+        self.current_group_idx = -1
+        self._update_action_buttons_state()
 
         self.worker = DeduplicatorWorker(
             directories=[target_dir],
@@ -238,6 +249,7 @@ class DedupeTab(QWidget):
             self.btn_scan.setEnabled(True)
             self.btn_cancel.setEnabled(False)
             self.progress_bar.setVisible(False)
+            self._update_action_buttons_state()
 
     def _on_progress(self, current: int, total: int, msg: str):
         if total > 0:
@@ -261,14 +273,17 @@ class DedupeTab(QWidget):
 
         if groups:
             self.list_groups.setCurrentRow(0)
+            self._on_group_selected(0)
         else:
             self._clear_cards()
+        self._update_action_buttons_state()
 
     def _on_error(self, err_msg: str):
         self.btn_scan.setEnabled(True)
         self.btn_cancel.setEnabled(False)
         self.progress_bar.setVisible(False)
         self.lbl_status.setText(f"Error: {err_msg}")
+        self._update_action_buttons_state()
         QMessageBox.critical(self, "Scan Error", err_msg)
 
     def _clear_cards(self):
@@ -282,12 +297,14 @@ class DedupeTab(QWidget):
         self.lbl_preview_right.setText("No duplicates to compare")
         self.lbl_info_right.setText("-")
         self.right_card.setTitle("Photo B (Right)")
+        self._update_action_buttons_state()
 
     def _on_group_selected(self, row: int):
         if row < 0 or row >= len(self.duplicate_groups):
             self._clear_cards()
             return
         self.current_group_idx = row
+        self._update_action_buttons_state()
         grp = self.duplicate_groups[row]
         if len(grp) < 2:
             self._clear_cards()
@@ -421,5 +438,156 @@ class DedupeTab(QWidget):
                     self._clear_cards()
                     self.lbl_status.setText("All duplicate groups have been resolved!")
 
+                self._update_action_buttons_state()
+
         except Exception as e:
             QMessageBox.critical(self, "Error Moving Duplicate", str(e))
+
+    def _update_action_buttons_state(self):
+        """Enable or disable comparison and batch resolution buttons based on current state."""
+        has_active_selection = (
+            bool(self.duplicate_groups)
+            and 0 <= self.current_group_idx < len(self.duplicate_groups)
+        )
+        self.btn_keep_left.setEnabled(has_active_selection)
+        self.btn_keep_right.setEnabled(has_active_selection)
+        self.btn_keep_higher_res.setEnabled(has_active_selection)
+        self.btn_auto_resolve_all.setEnabled(bool(self.duplicate_groups))
+
+    def _auto_resolve_all_highest_res(self):
+        """Automatically keep the highest resolution / highest quality image in all duplicate groups, moving lower resolution duplicates to trash."""
+        if not self.duplicate_groups:
+            QMessageBox.information(
+                self,
+                "No Duplicates",
+                "There are no duplicate groups to resolve. Please run a duplicate scan first.",
+            )
+            return
+
+        total_groups = len(self.duplicate_groups)
+        total_files = sum(len(grp) for grp in self.duplicate_groups)
+        excess_files = total_files - total_groups
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Keep Highest Resolution on ALL Duplicates",
+            f"<h3>Auto-Resolve All Duplicates?</h3>"
+            f"<p>This will analyze all <b>{total_groups:,}</b> duplicate sets ({total_files:,} total files).</p>"
+            f"<p>In every set, the image with the <b>highest resolution</b> (and largest file size as tie-breaker) will be kept.<br>"
+            f"The other <b>{excess_files:,}</b> lower-resolution / redundant duplicate files will be safely moved to:</p>"
+            f"<pre>/Workspaces/Photos/_Duplicates_Trash</pre>"
+            f"<p>Are you sure you want to proceed?</p>",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        trash_dir = Path("/Workspaces/Photos/_Duplicates_Trash")
+        trash_dir.mkdir(parents=True, exist_ok=True)
+
+        progress = QProgressDialog(
+            "Resolving duplicates by highest resolution...",
+            "Cancel",
+            0,
+            total_groups,
+            self,
+        )
+        progress.setWindowTitle("Auto-Resolving Duplicates")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        resolved_groups = 0
+        total_trashed = 0
+        errors = []
+        remaining_groups = []
+
+        for idx, grp in enumerate(self.duplicate_groups):
+            if progress.wasCanceled():
+                remaining_groups.extend(self.duplicate_groups[idx:])
+                break
+
+            progress.setValue(idx)
+            if grp:
+                progress.setLabelText(f"Resolving set {idx + 1} of {total_groups}: {grp[0].get('filename', '')}...")
+            QApplication.processEvents()
+
+            if len(grp) < 2:
+                continue
+
+            # Rank files: highest resolution (w * h) first, then largest file size
+            ranked = sorted(
+                grp,
+                key=lambda x: (x.get("width", 0) * x.get("height", 0), x.get("size", 0)),
+                reverse=True,
+            )
+
+            trash_items = ranked[1:]
+            for item in trash_items:
+                target_name = item["filename"]
+                dest = trash_dir / target_name
+                if dest.exists():
+                    stem = Path(target_name).stem
+                    suffix = Path(target_name).suffix
+                    counter = 1
+                    while (trash_dir / f"{stem}_{counter}{suffix}").exists():
+                        counter += 1
+                    dest = trash_dir / f"{stem}_{counter}{suffix}"
+
+                try:
+                    src = Path(item["path"])
+                    if src.exists():
+                        shutil.move(str(src), str(dest))
+                        total_trashed += 1
+                except Exception as e:
+                    errors.append(f"{item['filename']}: {e}")
+
+            resolved_groups += 1
+
+        progress.setValue(total_groups)
+
+        # Update list widget with blocked signals
+        self.list_groups.blockSignals(True)
+        try:
+            if not remaining_groups:
+                self.duplicate_groups = []
+                self.list_groups.clear()
+                self.current_group_idx = -1
+                self._clear_cards()
+                self.lbl_groups_count.setText("Duplicate Groups (0 found)")
+                self.lbl_status.setText(
+                    f"Auto-resolved {resolved_groups:,} sets. Moved {total_trashed:,} duplicate files to trash."
+                )
+
+                msg = (
+                    f"<b>Successfully resolved all {resolved_groups:,} duplicate sets!</b><br><br>"
+                    f"<b>{total_trashed:,}</b> duplicate files were moved to:<br>"
+                    f"<code>/Workspaces/Photos/_Duplicates_Trash</code>"
+                )
+                if errors:
+                    msg += f"<br><br><span style='color:red;'>Encountered {len(errors)} file move errors:</span><br>" + "<br>".join(errors[:5])
+                QMessageBox.information(self, "Auto-Resolve Complete", msg)
+            else:
+                # Canceled before finishing all sets
+                self.duplicate_groups = remaining_groups
+                self.list_groups.clear()
+                for i, grp in enumerate(self.duplicate_groups, 1):
+                    names = ", ".join(item["filename"] for item in grp[:2])
+                    item_widget = QListWidgetItem(f"Set #{i} ({len(grp)} files): {names}")
+                    self.list_groups.addItem(item_widget)
+
+                self.lbl_groups_count.setText(f"Duplicate Groups ({len(self.duplicate_groups):,} found)")
+                if self.duplicate_groups:
+                    self.list_groups.setCurrentRow(0)
+                    self._on_group_selected(0)
+                else:
+                    self._clear_cards()
+                self.lbl_status.setText(
+                    f"Auto-resolve canceled. Resolved {resolved_groups:,} sets, moved {total_trashed:,} files."
+                )
+        finally:
+            self.list_groups.blockSignals(False)
+
+        self._update_action_buttons_state()
